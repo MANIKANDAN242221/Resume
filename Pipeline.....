@@ -1,0 +1,333 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('ECR Login') {
+            steps {
+                script {
+		    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-eks-iam-cred']]){
+                    // Login to ECR 
+                    sh "aws ecr get-login-password --region  ap-south-1 | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com"
+                     }
+                }
+            }
+        }
+	
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    // Build Docker Image
+                    sh "docker build -t ${ECR_REPO}:${env.BUILD_NUMBER} ."
+                }
+            }
+        }
+
+	   stage('Image Scan') {
+            steps {
+		catchError {
+                    // Build Docker Image
+                    sh "trivy image --severity HIGH,CRITICAL --format template --template @/home/master/html.tpl -o /home/master/backend-test-report/report-latest.html ${ECR_REPO}:${env.BUILD_NUMBER}"
+                }
+            }
+        }
+
+        stage('Publish Report') {
+            steps {
+                // Publish the HTML report
+                publishHTML(target: [
+                    reportName: 'Trivy Scan Report',
+                    reportDir: '/home/master/backend-test-report/',
+                    reportFiles: 'report-latest.html',
+		     indexFile: 'report-latest.html',
+                    allowMissing: false,
+                    alwaysLinkToLastBuild: true,
+		    keepAll: true
+                ])
+            }
+        }
+        stage('Push Docker Image') {
+            steps {
+                script {
+			
+                    // Tag and Push the Docker Image to ECR
+                    sh "docker tag ${ECR_REPO}:${env.BUILD_NUMBER} ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com/${ECR_REPO}:${env.BUILD_NUMBER}"
+                    sh "DOCKER_CLI_EXPERIMENTAL=1 docker push ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com/${ECR_REPO}:${env.BUILD_NUMBER}"
+                }
+            }
+        }
+
+        stage('Update Deployment') {
+            steps {
+                script {
+                    // Update deployment.yaml (make sure to have it in your repo)
+                    sh "sed -i 's|image: .*|image: ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com/${ECR_REPO}:${env.BUILD_NUMBER}|' deployment.yaml"
+		    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-eks-iam-cred']]) {
+                    // Apply changes to EKS
+                    withEnv(["KUBECONFIG=${KUBECONFIG}"]) {
+			sh "echo $KUBECONFIG"
+			sh "kubectl config use-context default-context"
+			sh "kubectl config current-context"
+			sh " kubectl create secret docker-registry ecr-secret  --docker-server=https://905418075393.dkr.ecr.ap-south-1.amazonaws.com --docker-username=AWS  --docker-password=\$(aws ecr get-login-password --region ap-south-1) --namespace kcpl-test --dry-run=client -o yaml | kubectl apply -f -"
+                        sh "kubectl apply -f deployment.yaml"
+                    }
+                   }
+		}
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Pipeline completed successfully!'
+	    script{
+		sh "docker rmi ${ECR_REPO}:${env.BUILD_NUMBER}"
+		sh "docker rmi ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com/${ECR_REPO}:${env.BUILD_NUMBER}"
+	    }
+		
+        }
+        failure {
+            echo 'Pipeline failed.'
+        }
+    }
+}
+
+
+##Jenkins Pod
+pipeline {
+    agent any
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+		    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-eks-iam-cred']]){
+                    // Login to ECR
+                    sh "aws ecr get-login-password --region  ap-south-1 | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com"
+                     }
+                    // Build Docker Image
+                    sh "docker build -t ${ECR_REPO}:${IMAGE_TAG} ."
+                }
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                script {
+			
+                    // Tag and Push the Docker Image to ECR
+                    sh "docker tag ${ECR_REPO}:${IMAGE_TAG} ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}"
+                    sh "docker push ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('Update Deployment') {
+            steps {
+                script {
+                    // Update deployment.yaml (make sure to have it in your repo)
+                    sh "sed -i 's|image: .*|image: ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}|' deployment.yaml"
+		    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-eks-iam-cred']]) {
+                    // Apply changes to EKS
+                    withEnv(["KUBECONFIG=${KUBECONFIG}"]) {
+			sh "kubectl config use-context ${KUBECONTEXT}"
+                        sh "kubectl get current-context"
+			sh "kubectl create secret docker-registry ecr-secret  --docker-server=https://905418075393.dkr.ecr.ap-south-1.amazonaws.com --docker-username=AWS --docker-password=\$(aws ecr get-login-password --region ap-south-1) --namespace ${env.NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -"
+                        sh "kubectl apply -f deployment.yaml"
+                    }
+                   }
+		}
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed.'
+        }
+    }
+}
+
+##Frontend
+pipeline {
+    agent any
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('ECR Login') {
+            steps {
+                script {
+		    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-eks-iam-cred']]){
+                    // Login to ECR 
+                    sh "aws ecr get-login-password --region  ap-south-1 | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com"
+                     }
+                }
+            }
+        }
+	
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    // Build Docker Image
+                    sh "docker build -t ${ECR_REPO}:${env.BUILD_NUMBER} ."
+                }
+            }
+        }
+
+	 stage('Image Scan') {
+            steps {
+		catchError {
+                    // Build Docker Image
+                    sh "trivy image --severity HIGH,CRITICAL --format template --template @/home/master/html.tpl -o /home/master/frontend-test-report/report-latest.html ${ECR_REPO}:${env.BUILD_NUMBER}"
+                }
+            }
+        }
+
+        stage('Publish Report') {
+            steps {
+                // Publish the HTML report
+                publishHTML(target: [
+                    reportName: 'Trivy Scan Report',
+                    reportDir: '/home/master/frontend-test-report/',
+                    reportFiles: 'report-latest.html',
+		     indexFile: 'report-latest.html',
+                    allowMissing: false,
+                    alwaysLinkToLastBuild: true,
+		    keepAll: true
+                ])
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                script {
+			
+                    // Tag and Push the Docker Image to ECR
+                    sh "docker tag ${ECR_REPO}:${env.BUILD_NUMBER} ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com/${ECR_REPO}:${env.BUILD_NUMBER}"
+                    sh "docker push ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com/${ECR_REPO}:${env.BUILD_NUMBER}"
+                }
+            }
+        }
+
+        stage('Update Deployment') {
+            steps {
+                script {
+                    // Update deployment.yaml (make sure to have it in your repo)
+                    sh "sed -i 's|image: .*|image: ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com/${ECR_REPO}:${env.BUILD_NUMBER}|' deployment.yaml"
+		    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-eks-iam-cred']]) {
+                    // Apply changes to EKS
+                    withEnv(["KUBECONFIG=${KUBECONFIG}"]) {
+			sh "kubectl create secret docker-registry ecr-secret  --docker-server=https://905418075393.dkr.ecr.ap-south-1.amazonaws.com --docker-username=AWS --docker-password=\$(aws ecr get-login-password --region ap-south-1) --namespace ${env.NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -"
+                        sh "kubectl apply -f deployment.yaml"
+                     }
+                   }
+	       }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Pipeline completed successfully!'
+	    script{
+		sh "docker rmi ${ECR_REPO}:${env.BUILD_NUMBER}"
+		sh "docker rmi ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com/${ECR_REPO}:${env.BUILD_NUMBER}"
+	    }
+        }
+        failure {
+            echo 'Pipeline failed.'
+        }
+    }
+}
+
+#jenkins prods
+pipeline {
+    agent any
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-eks-iam-cred']]){
+                    // Login to ECR
+                    sh "aws ecr get-login-password --region  ap-south-1 | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com"
+                     }
+                    // Build Docker Image
+                    sh "docker build -t ${ECR_REPO}:${IMAGE_TAG} ."
+                }
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                script {
+
+                    // Tag and Push the Docker Image to ECR
+                    sh "docker tag ${ECR_REPO}:${IMAGE_TAG} ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}"
+                    sh "docker push ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('Update Deployment') {
+            steps {
+                script {
+                    // Update deployment.yaml (make sure to have it in your repo)
+                    sh "sed -i 's|image: .*|image: ${AWS_ACCOUNT_ID}.dkr.ecr.ap-south-1.amazonaws.com/${ECR_REPO}:${IMAGE_TAG}|' deployment.yaml"
+                    withCredentials([[$class: 'AmazonWebServicesCredentialsBinding', credentialsId: 'aws-eks-iam-cred']]) {
+                    // Apply changes to EKS
+                    withEnv(["KUBECONFIG=${KUBECONFIG}"]) {
+                        sh "kubectl config use-context ${KUBECONTEXT}"
+                        sh "kubectl config current-context"
+                        sh "kubectl create secret docker-registry ecr-secret  --docker-server=https://905418075393.dkr.ecr.ap-south-1.amazonaws.com --docker-username=AWS --docker-password=\$(aws ecr get-login-password --region ap-south-1) --namespace ${env.NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -"
+                        sh "kubectl apply -f deployment.yaml"
+                    }
+                   }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed.'
+        }
+    }
+}
+
+##Kubernetes
+masternode1@k8s-masternode1:~$ kubectl get node
+NAME              STATUS   ROLES           AGE    VERSION
+general           Ready    <none>          111d   v1.32.3
+k8s-masternode1   Ready    control-plane   119d   v1.32.2
+k8s-masternode2   Ready    control-plane   118d   v1.32.2
+k8s-slavenode1    Ready    worker          115d   v1.32.2
+k8s-slavenode2    Ready    worker          115d   v1.32.2
