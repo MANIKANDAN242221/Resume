@@ -1,0 +1,157 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    cni.projectcalico.org/containerID: 62c7b3ad6f054dcc36e42a9f6b3b92669a2620d75dded24563c6650bed62e563
+    cni.projectcalico.org/podIP: 10.10.5.119/32
+    cni.projectcalico.org/podIPs: 10.10.5.119/32
+    kubectl.kubernetes.io/restartedAt: '2025-06-30T17:53:38+05:30'
+  creationTimestamp: '2025-07-08T10:40:34Z'
+  generateName: backend-778464794f-
+  labels:
+    app: backend
+    pod-template-hash: 778464794f
+  name: backend-778464794f-54xtq
+  namespace: kcpl-test
+  ownerReferences:
+    - apiVersion: apps/v1
+      blockOwnerDeletion: true
+      controller: true
+      kind: ReplicaSet
+      name: backend-778464794f
+      uid: ce775fc2-8817-44b2-978d-5b3c0f1a8d8c
+  resourceVersion: '24966469'
+  uid: ef635456-22f6-444b-8117-4be1d2d257c6
+spec:
+  containers:
+    - env:
+        - name: JWT_PRIVATE_KEY
+          valueFrom:
+            secretKeyRef:
+              key: private.key
+              name: rsa-secret
+        - name: JWT_PUBLIC_KEY
+          valueFrom:
+            secretKeyRef:
+              key: public.key
+              name: rsa-secret
+      envFrom:
+        - secretRef:
+            name: backend
+      image: 905418075393.dkr.ecr.ap-south-1.amazonaws.com/kcplbackend-test:1179
+      imagePullPolicy: IfNotPresent
+      name: backend
+      ports:
+        - containerPort: 8001
+          protocol: TCP
+      resources:
+        limits:
+          cpu: '2'
+          memory: 1500Mi
+        requests:
+          cpu: 500m
+          memory: 1000Mi
+      terminationMessagePath: /dev/termination-log
+      terminationMessagePolicy: File
+      volumeMounts:
+        - mountPath: /app/assets
+          name: assets-storage
+        - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+          name: kube-api-access-sd2gd
+          readOnly: true
+  dnsPolicy: ClusterFirst
+  enableServiceLinks: true
+  imagePullSecrets:
+    - name: ecr-secret
+  nodeName: k8s-slavenode1
+  preemptionPolicy: PreemptLowerPriority
+  priority: 0
+  restartPolicy: Always
+  schedulerName: default-scheduler
+  securityContext: {}
+  serviceAccount: default
+  serviceAccountName: default
+  terminationGracePeriodSeconds: 30
+  tolerations:
+    - effect: NoExecute
+      key: node.kubernetes.io/not-ready
+      operator: Exists
+      tolerationSeconds: 300
+    - effect: NoExecute
+      key: node.kubernetes.io/unreachable
+      operator: Exists
+      tolerationSeconds: 300
+  volumes:
+    - name: assets-storage
+      persistentVolumeClaim:
+        claimName: test-nfs-pvc
+    - name: kube-api-access-sd2gd
+      projected:
+        defaultMode: 420
+        sources:
+          - serviceAccountToken:
+              expirationSeconds: 3607
+              path: token
+          - configMap:
+              items:
+                - key: ca.crt
+                  path: ca.crt
+              name: kube-root-ca.crt
+          - downwardAPI:
+              items:
+                - fieldRef:
+                    apiVersion: v1
+                    fieldPath: metadata.namespace
+                  path: namespace
+status:
+  conditions:
+    - lastProbeTime: null
+      lastTransitionTime: '2025-07-08T10:40:50Z'
+      status: 'True'
+      type: PodReadyToStartContainers
+    - lastProbeTime: null
+      lastTransitionTime: '2025-07-08T10:40:34Z'
+      status: 'True'
+      type: Initialized
+    - lastProbeTime: null
+      lastTransitionTime: '2025-07-08T10:40:50Z'
+      status: 'True'
+      type: Ready
+    - lastProbeTime: null
+      lastTransitionTime: '2025-07-08T10:40:50Z'
+      status: 'True'
+      type: ContainersReady
+    - lastProbeTime: null
+      lastTransitionTime: '2025-07-08T10:40:34Z'
+      status: 'True'
+      type: PodScheduled
+  containerStatuses:
+    - containerID: >-
+        containerd://709aae7e3ae21297fc1036d12dd9a94d4ebaab24258faed8daa1baffa427abd8
+      image: 905418075393.dkr.ecr.ap-south-1.amazonaws.com/kcplbackend-test:1179
+      imageID: >-
+        905418075393.dkr.ecr.ap-south-1.amazonaws.com/kcplbackend-test@sha256:112f90a7ec29b3e1179693d2d70c171a3bd58a44ead8d1aa34e7185021761610
+      lastState: {}
+      name: backend
+      ready: true
+      restartCount: 0
+      started: true
+      state:
+        running:
+          startedAt: '2025-07-08T10:40:49Z'
+      volumeMounts:
+        - mountPath: /app/assets
+          name: assets-storage
+        - mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+          name: kube-api-access-sd2gd
+          readOnly: true
+          recursiveReadOnly: Disabled
+  hostIP: 192.168.64.69
+  hostIPs:
+    - ip: 192.168.64.69
+  phase: Running
+  podIP: 10.10.5.119
+  podIPs:
+    - ip: 10.10.5.119
+  qosClass: Burstable
+  startTime: '2025-07-08T10:40:34Z'
